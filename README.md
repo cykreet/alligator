@@ -1,3 +1,3 @@
 # alligator
 
-Discord webhook proxy server, which "batches" concurrent requests to minimise ratelimits.
+Discord webhook proxy server, batches concurrent requests to minimise ratelimits.

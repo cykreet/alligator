@@ -1,3 +1,4 @@
+export const LISTEN_PORT = +(Deno.env.get("PORT") ?? 8080);
 export const EXECUTION_TIMEOUT_MS = +(Deno.env.get("EXECUTION_TIMEOUT_MS") ?? 2000);
 export const DISCORD_WEBHOOK_MESSAGE_EMBED_LIMIT = Deno.env.get("DISCORD_WEBHOOK_MESSAGE_EMBED_LIMIT") ?? 10;
 export const DISCORD_WEBHOOK_ENDPOINT = Deno.env.get("DISCORD_WEBHOOK_ENDPOINT") ?? "https://discord.com/api/webhooks";

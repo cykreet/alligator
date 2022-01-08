@@ -1,4 +1,9 @@
-import { DISCORD_WEBHOOK_ENDPOINT, DISCORD_WEBHOOK_MESSAGE_EMBED_LIMIT, EXECUTION_TIMEOUT_MS } from "./constants.ts";
+import {
+	DISCORD_WEBHOOK_ENDPOINT,
+	DISCORD_WEBHOOK_MESSAGE_EMBED_LIMIT,
+	EXECUTION_TIMEOUT_MS,
+	LISTEN_PORT,
+} from "./constants.ts";
 import { serve } from "https://deno.land/std@0.119.0/http/server.ts";
 import { Status } from "https://deno.land/std@0.119.0/http/mod.ts";
 import { validateRequestPath } from "./helpers/validate-path.ts";
@@ -96,4 +101,4 @@ async function executeBatch(batch: RequestBatch): Promise<void> {
 	batch.reply(response);
 }
 
-serve(handleRequest, { port: 8080 });
+serve(handleRequest, { port: LISTEN_PORT });
