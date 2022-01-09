@@ -1,4 +1,4 @@
-import { RESTPostAPIWebhookWithTokenJSONBody } from "https://deno.land/x/discord_api_types/v9.ts";
+import { WebhookPayload } from "../deps.ts";
 
 export interface ValidatedRequest {
 	valid: boolean;
@@ -7,12 +7,10 @@ export interface ValidatedRequest {
 	webhookToken?: string;
 }
 
-export type Payload = RESTPostAPIWebhookWithTokenJSONBody;
-
 export interface RequestBatch {
 	reply: (response: Response) => void;
 	batchId: string;
-	payloads: Payload[];
+	payloads: WebhookPayload[];
 	webhookToken: string;
 	webhookId: string;
 	created: Date;

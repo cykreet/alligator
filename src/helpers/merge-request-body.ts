@@ -1,7 +1,7 @@
-import { Payload } from "../types.ts";
+import { WebhookPayload } from "../../deps.ts";
 
-export function mergeRequestBody(payloads: Payload[]) {
-	const requestPayload: Payload = {};
+export function mergeRequestBody(payloads: WebhookPayload[]) {
+	const requestPayload: WebhookPayload = {};
 	for (const payload of payloads) {
 		if (payload.content) {
 			if (requestPayload.content) {

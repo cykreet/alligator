@@ -4,11 +4,10 @@ import {
 	EXECUTION_TIMEOUT_MS,
 	LISTEN_PORT,
 } from "./constants.ts";
-import { serve } from "https://deno.land/std@0.119.0/http/server.ts";
-import { Status } from "https://deno.land/std@0.119.0/http/mod.ts";
+import { serve, HttpStatus, WebhookPayload } from "../deps.ts";
 import { validateRequestPath } from "./helpers/validate-path.ts";
 import { mergeRequestBody } from "./helpers/merge-request-body.ts";
-import { RequestBatch, Payload } from "./types.ts";
+import { RequestBatch } from "./types.ts";
 
 const webhookMessageMap = new Map<string, RequestBatch>();
 const timeoutMap = new Map<string, number>();
@@ -18,7 +17,7 @@ async function handleRequest(request: Request): Promise<Response> {
 	if (!validatedRequest.valid) {
 		console.error(validatedRequest.message);
 		const errorMessage = { error: "Not Found", code: 0 };
-		return new Response(JSON.stringify(errorMessage), { status: Status.NotFound });
+		return new Response(JSON.stringify(errorMessage), { status: HttpStatus.NotFound });
 	}
 
 	// hacky as shit, but i haven't seen a "proper" way to do this.
@@ -33,7 +32,7 @@ async function handleRequest(request: Request): Promise<Response> {
 	const webhookToken = validatedRequest.webhookToken!;
 	const batchId = `${webhookId}-${webhookToken}`;
 	let webhookMessageBatch = webhookMessageMap.get(batchId);
-	const requestBody: Payload = await request.json();
+	const requestBody: WebhookPayload = await request.json();
 	if (webhookMessageBatch == null) {
 		webhookMessageBatch = {
 			payloads: [requestBody],
@@ -91,7 +90,6 @@ async function executeBatch(batch: RequestBatch): Promise<void> {
 	headers.append("X-Batch-Id", batch.batchId);
 	headers.append("X-Batch-Size", batch.payloads.length.toString());
 	headers.append("X-Batch-Created", batch.created.toISOString());
-
 	const response = new Response(discordResponse.body, {
 		status: discordResponse.status,
 		statusText: discordResponse.statusText,
