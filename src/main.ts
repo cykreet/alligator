@@ -14,7 +14,7 @@ const timeoutMap = new Map<string, number>();
 
 async function handleRequest(request: Request): Promise<Response> {
 	const validatedRequest = validateRequestPath(request.url);
-	if (!validatedRequest.valid) {
+	if (!request.bodyUsed || !validatedRequest.valid) {
 		console.error(validatedRequest.message);
 		const errorMessage = { error: "Not Found", code: 0 };
 		return new Response(JSON.stringify(errorMessage), { status: HttpStatus.NotFound });

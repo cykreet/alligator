@@ -1,5 +1,7 @@
 import { WebhookPayload } from "../../deps.ts";
 
+// todo: request name, avatar_url and other missing things
+// probably use first payload as the target
 export function mergeRequestBody(payloads: WebhookPayload[]) {
 	const requestPayload: WebhookPayload = {};
 	for (const payload of payloads) {
