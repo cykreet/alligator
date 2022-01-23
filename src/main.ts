@@ -17,7 +17,7 @@ async function handleRequest(request: Request): Promise<Response> {
 
 	// hacky as shit, but i haven't seen a "proper" way to do this.
 	// using a promise allows us to reply to all requests in the batch
-	// at the same time by resolving the returned promise when needed
+	// at the same time by resolving the returned promise when needed.
 	let reply: (response: Response) => void = () => {};
 	const responsePromise = new Promise<Response>((resolve, _reject) => {
 		reply = resolve;
