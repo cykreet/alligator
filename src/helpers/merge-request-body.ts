@@ -1,36 +1,47 @@
 import { WebhookPayload } from "../../deps.ts";
 
-// todo: request name, avatar_url and other missing things
-// probably use first payload as the target
 export function mergeRequestBody(payloads: WebhookPayload[]) {
 	const requestPayload: WebhookPayload = {};
-	for (const payload of payloads) {
+	for (let i = 0; i < payloads.length; i++) {
+		const payload = payloads[i];
 		if (payload.content) {
 			if (requestPayload.content) {
 				requestPayload.content += `\n${payload.content}`;
-				continue;
+			} else {
+				requestPayload.content = payload.content;
 			}
-
-			requestPayload.content = payload.content;
 		}
 
 		if (payload.embeds) {
 			if (requestPayload.embeds) {
 				requestPayload.embeds.push(...payload.embeds);
-				continue;
+			} else {
+				requestPayload.embeds = payload.embeds;
 			}
-
-			requestPayload.embeds = payload.embeds;
 		}
 
 		if (payload.components) {
 			if (requestPayload.components) {
 				requestPayload.components.push(...payload.components);
-				continue;
+			} else {
+				requestPayload.components = payload.components;
 			}
-
-			requestPayload.components = payload.components;
 		}
+
+		if (payload.attachments) {
+			if (requestPayload.attachments) {
+				requestPayload.attachments.push(...payload.attachments);
+			} else {
+				requestPayload.attachments = payload.attachments;
+			}
+		}
+
+		const initialPayload = i === 0;
+		if (!initialPayload) continue;
+		if (payload.username) requestPayload.username = payload.username;
+		if (payload.avatar_url) requestPayload.avatar_url = payload.avatar_url;
+		if (payload.allowed_mentions) requestPayload.allowed_mentions = payload.allowed_mentions;
+		if (payload.tts) requestPayload.tts = payload.tts;
 	}
 
 	return requestPayload;
