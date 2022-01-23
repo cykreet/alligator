@@ -1,12 +1,7 @@
-import {
-	DISCORD_WEBHOOK_ENDPOINT,
-	DISCORD_WEBHOOK_MESSAGE_EMBED_LIMIT,
-	EXECUTION_TIMEOUT_MS,
-	LISTEN_PORT,
-} from "./constants.ts";
+import { DISCORD_WEBHOOK_MESSAGE_EMBED_LIMIT, EXECUTION_TIMEOUT_MS, LISTEN_PORT } from "./constants.ts";
 import { serve, HttpStatus, WebhookPayload } from "../deps.ts";
 import { validateRequestPath } from "./helpers/validate-path.ts";
-import { mergeRequestBody } from "./helpers/merge-request-body.ts";
+import { deliverBatch } from "./helpers/deliver-batch.ts";
 import { RequestBatch } from "./types.ts";
 
 const webhookMessageMap = new Map<string, RequestBatch>();
@@ -54,14 +49,14 @@ async function handleRequest(request: Request): Promise<Response> {
 		removeTimeout(batchId);
 		// responds to requests in the current batch, so the request is then added
 		// to a new batch with handleRequest()
-		executeBatch(webhookMessageBatch);
+		deliverBatch(webhookMessageBatch);
 		return await handleRequest(request);
 	}
 
 	if (timeoutMap.has(batchId)) removeTimeout(batchId);
 	const executeTimeout = setTimeout(async () => {
 		webhookMessageMap.delete(batchId);
-		await executeBatch(webhookMessageBatch!);
+		await deliverBatch(webhookMessageBatch!);
 	}, EXECUTION_TIMEOUT_MS);
 
 	timeoutMap.set(batchId, executeTimeout);
@@ -72,31 +67,6 @@ function removeTimeout(batchId: string) {
 	const timeoutId = timeoutMap.get(batchId);
 	clearTimeout(timeoutId);
 	timeoutMap.delete(batchId);
-}
-
-async function executeBatch(batch: RequestBatch): Promise<void> {
-	const requestBody = mergeRequestBody(batch.payloads);
-	const requestOptions: RequestInit = {
-		method: "POST",
-		body: JSON.stringify(requestBody),
-		headers: {
-			"Content-Type": "application/json",
-		},
-	};
-
-	const endpoint = `${DISCORD_WEBHOOK_ENDPOINT}/${batch.webhookId}/${batch.webhookToken}`;
-	const discordResponse = await fetch(endpoint, requestOptions);
-	const headers = new Headers(discordResponse.headers);
-	headers.append("X-Batch-Id", batch.batchId);
-	headers.append("X-Batch-Size", batch.payloads.length.toString());
-	headers.append("X-Batch-Created", batch.created.toISOString());
-	const response = new Response(discordResponse.body, {
-		status: discordResponse.status,
-		statusText: discordResponse.statusText,
-		headers: headers,
-	});
-
-	batch.reply(response);
 }
 
 serve(handleRequest, { port: LISTEN_PORT });
