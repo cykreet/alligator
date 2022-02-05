@@ -1,6 +1,6 @@
 import { WebhookPayload } from "../../deps.ts";
 
-export function mergeRequestBody(payloads: WebhookPayload[]) {
+export function mergeBatchBody(payloads: WebhookPayload[]) {
 	const requestPayload: WebhookPayload = {};
 	for (let i = 0; i < payloads.length; i++) {
 		const payload = payloads[i];

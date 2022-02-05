@@ -1,9 +1,9 @@
 import { DISCORD_WEBHOOK_ENDPOINT } from "../constants.ts";
-import { mergeRequestBody } from "./merge-request-body.ts";
+import { mergeBatchBody } from "./merge-batch-body.ts";
 import { RequestBatch } from "../types.ts";
 
 export async function deliverBatch(batch: RequestBatch): Promise<void> {
-	const requestBody = mergeRequestBody(batch.payloads);
+	const requestBody = mergeBatchBody(batch.payloads);
 	const requestOptions: RequestInit = {
 		method: "POST",
 		body: JSON.stringify(requestBody),
