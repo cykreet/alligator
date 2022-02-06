@@ -1,5 +1,4 @@
 name: Build and Publish Package
-
 on:
   push:
     tags:
@@ -30,3 +29,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - name: Update Docker Info
+        uses: peter-evans/dockerhub-description@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+          repository: cykreet/alligator
+          short-description: ${{ github.event.repository.description }}
