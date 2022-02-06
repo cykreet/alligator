@@ -9,9 +9,9 @@ const timeoutMap = new Map<string, number>();
 
 async function handleRequest(request: Request): Promise<Response> {
 	const validatedRequest = validateRequestPath(request.url);
-	if (!request.bodyUsed || !validatedRequest.valid) {
-		console.error(validatedRequest.message);
-		const errorMessage = { error: "Not Found", code: 0 };
+	if (!!request.body || !validatedRequest.valid) {
+		console.error(validatedRequest.message ?? "No request body provided.");
+		const errorMessage = { error: "Invalid proxy request", code: 100 };
 		return new Response(JSON.stringify(errorMessage), { status: HttpStatus.NotFound });
 	}
 
@@ -30,11 +30,12 @@ async function handleRequest(request: Request): Promise<Response> {
 	const requestBody: WebhookPayload = await request.json();
 	if (webhookMessageBatch == null) {
 		webhookMessageBatch = {
-			payloads: [requestBody],
-			created: new Date(),
-			webhookToken,
-			webhookId,
 			batchId,
+			webhookId,
+			webhookToken,
+			payloads: [requestBody],
+			searchParams: validatedRequest.searchParams,
+			created: new Date(),
 			reply,
 		};
 

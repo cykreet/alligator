@@ -5,6 +5,7 @@ export interface ValidatedRequest {
 	message?: string;
 	webhookId?: string;
 	webhookToken?: string;
+	searchParams?: SearchParams;
 }
 
 export interface RequestBatch {
@@ -14,4 +15,10 @@ export interface RequestBatch {
 	webhookToken: string;
 	webhookId: string;
 	created: Date;
+	searchParams?: SearchParams;
+}
+
+export interface SearchParams {
+	wait?: boolean;
+	threadId?: string;
 }
