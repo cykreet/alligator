@@ -69,5 +69,5 @@ function removeTimeout(batchId: string) {
 	timeoutMap.delete(batchId);
 }
 
-await serve(handleRequest, { port: LISTEN_PORT });
+serve(handleRequest, { port: LISTEN_PORT });
 console.log(`Listening on port ${LISTEN_PORT}.`);
