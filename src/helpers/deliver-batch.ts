@@ -3,6 +3,7 @@ import { mergeBatchBody } from "./merge-batch-body.ts";
 import { RequestBatch } from "../types.ts";
 
 export async function deliverBatch(batch: RequestBatch): Promise<void> {
+	// todo: support attachments and multiform/form-data requests
 	const requestBody = mergeBatchBody(batch.payloads);
 	const requestOptions: RequestInit = {
 		method: "POST",

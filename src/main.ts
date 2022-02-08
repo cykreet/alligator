@@ -25,7 +25,7 @@ async function handleRequest(request: Request): Promise<Response> {
 
 	const webhookId = validatedRequest.webhookId!;
 	const webhookToken = validatedRequest.webhookToken!;
-	const batchId = `${webhookId}-${webhookToken}`;
+	const batchId = webhookId;
 	let webhookMessageBatch = webhookMessageMap.get(batchId);
 	const requestBody: WebhookPayload = await request.json();
 	if (webhookMessageBatch == null) {
@@ -57,6 +57,7 @@ async function handleRequest(request: Request): Promise<Response> {
 	if (timeoutMap.has(batchId)) removeTimeout(batchId);
 	const executeTimeout = setTimeout(async () => {
 		webhookMessageMap.delete(batchId);
+		timeoutMap.delete(batchId);
 		await deliverBatch(webhookMessageBatch!);
 	}, EXECUTION_TIMEOUT_MS);
 

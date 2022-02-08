@@ -36,12 +36,10 @@ export function mergeBatchBody(payloads: WebhookPayload[]) {
 			}
 		}
 
-		const initialPayload = i === 0;
-		if (!initialPayload) continue;
-		if (payload.username) requestPayload.username = payload.username;
-		if (payload.avatar_url) requestPayload.avatar_url = payload.avatar_url;
-		if (payload.allowed_mentions) requestPayload.allowed_mentions = payload.allowed_mentions;
-		if (payload.tts) requestPayload.tts = payload.tts;
+		if (payload.username == null) requestPayload.username = payload.username;
+		if (payload.avatar_url == null) requestPayload.avatar_url = payload.avatar_url;
+		if (payload.allowed_mentions == null) requestPayload.allowed_mentions = payload.allowed_mentions;
+		if (payload.tts == null) requestPayload.tts = payload.tts;
 	}
 
 	return requestPayload;
