@@ -9,7 +9,8 @@ const timeoutMap = new Map<string, number>();
 
 async function handleRequest(request: Request): Promise<Response> {
 	const validatedRequest = validateRequestPath(request.url);
-	if (!!request.body || !validatedRequest.valid) {
+	const requestBody = request.body ? await request.body.getReader().read() : null;
+	if (requestBody?.value == null || !validatedRequest.valid) {
 		console.error(validatedRequest.message ?? "No request body provided.");
 		const errorMessage = { error: "Invalid proxy request", code: 100 };
 		return new Response(JSON.stringify(errorMessage), { status: HttpStatus.NotFound });
@@ -27,13 +28,14 @@ async function handleRequest(request: Request): Promise<Response> {
 	const webhookToken = validatedRequest.webhookToken!;
 	const batchId = webhookId;
 	let webhookMessageBatch = webhookMessageMap.get(batchId);
-	const requestBody: WebhookPayload = await request.json();
+	const bodyDecoded = new TextDecoder().decode(requestBody.value);
+	const requestPayload = JSON.parse(bodyDecoded) as WebhookPayload;
 	if (webhookMessageBatch == null) {
 		webhookMessageBatch = {
 			batchId,
 			webhookId,
 			webhookToken,
-			payloads: [requestBody],
+			payloads: [requestPayload],
 			searchParams: validatedRequest.searchParams,
 			created: new Date(),
 			reply,
@@ -41,7 +43,7 @@ async function handleRequest(request: Request): Promise<Response> {
 
 		webhookMessageMap.set(batchId, webhookMessageBatch);
 	} else {
-		webhookMessageBatch.payloads.push(requestBody);
+		webhookMessageBatch.payloads.push(requestPayload);
 	}
 
 	const batchEmbeds = webhookMessageBatch.payloads.map((payload) => payload.embeds);
