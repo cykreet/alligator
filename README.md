@@ -12,6 +12,16 @@ this repository is set up to automatically push to the [docker registry](https:/
 docker run -d -p 8080:8080 --name alligator cykreet/alligator:latest
 ```
 
+## config
+
+alligator is configurable using a few different environment variables. here they are, for your convenience
+| variable                            | default                          | description                                                                                          |
+|-------------------------------------|----------------------------------|------------------------------------------------------------------------------------------------------|
+| LISTEN_PORT                         | `8080`                             | the port that alligator should listen to for incoming requests                                       |
+| EXECUTION_TIMEOUT_MS                | `2000`                             | how long alligator should wait for subsequent incoming requests before sending                       |
+| DISCORD_WEBHOOK_MESSAGE_EMBED_LIMIT | `10`                               | the number of embeds alligator should join in a single message                                       |
+| DISCORD_WEBHOOK_ENDPOINT            | `https://discord.com/api/webhooks` | the endpoint that your webhooks should be sent to. in almost all cases you won't need to change this |
+
 ## kinda neat
 
 once a batch has been delivered, alligator returns a few handy headers along with discord's response:
