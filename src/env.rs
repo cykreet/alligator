@@ -1,14 +1,25 @@
-use std::{env, str::FromStr};
+use std::{env, str::FromStr, time::Duration};
 
-pub fn get_env<T: FromStr>(key: &str, default: Option<T>) -> T {
-  return match env::var(key) {
-    Ok(val) => val.parse::<T>().ok().unwrap(),
-    Err(err) => {
-      if default.is_some() {
-        return default.unwrap();
-      };
+pub const DEFAULT_PORT: u16 = 8080;
+pub const DEFAULT_EXPIRES_DURATION: Duration = Duration::from_secs(7);
+pub const DISCORD_WEBHOOK_ENDPOINT: &str = "https://discordapp.com/api/webhooks";
 
-      panic!("Required environment variable missing: {}", err);
-    }
-  };
+pub fn get_env<T: FromStr>(name: &str, require: bool) -> Option<T> {
+	return match env::var(name) {
+		Ok(val) => val.parse::<T>().ok(),
+		Err(_) => {
+			if require {
+				panic!("Required environment variable missing: {}", name);
+			}
+
+			return None;
+		}
+	};
+}
+
+pub fn get_env_default<T: FromStr>(name: &str, default: T) -> T {
+	return match get_env(name, false) {
+		Some(val) => val,
+		None => default,
+	};
 }

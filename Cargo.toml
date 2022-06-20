@@ -8,6 +8,6 @@ tokio = { version = "1.19.2", default-features = false, features = ["macros", "r
 futures = { version = "0.3.21", default-features = false, features = ["async-await"] }
 serde = { version = "1.0.137", default-features = false, features = ["derive"] }
 serde_json = "1.0.81"
-hyper = { version = "0.14", features = ["full"] }
+hyper = { version = "0.14.19", features = ["full"] }
 lazy_static = "1.4.0"
 regex = "1.5.6"
