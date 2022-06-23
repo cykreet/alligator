@@ -1,5 +1,5 @@
 use futures::TryStreamExt;
-use hyper::{header::HeaderValue, http::request::Parts, Body, Method};
+use hyper::{header::HeaderValue, http::request::Parts, Body, Client, Method, Request};
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,8 @@ use std::{
 	hash::{Hash, Hasher},
 	time::SystemTime,
 };
+
+use crate::env::{get_env_default, DISCORD_WEBHOOK_ENDPOINT};
 
 #[derive(Clone)]
 pub struct WebhookBatch {
@@ -30,25 +32,20 @@ pub struct WebhookPayload {
 	tts: bool,
 }
 
-const BODY_LIMIT: u16 = 32000; // 4KB
-const PATH_RE: &str = r"/(http?s?://)?[A-z0-9.:\-_]{1,253}/api/(v[0-9]{1,3}/)?webhooks/(?P<webhook_id>[0-9]\w+)/(?P<webhook_token>[A-z0-9-]{1,100})(\?(?P<params>[A-z0-9-\.=&]{1,50}))?/";
+// const BODY_LIMIT: u16 = 32000; // 4KB
+const PATH_RE: &str = r"/api/(v[0-9]{1,3}/)?webhooks/(?P<webhook_id>[0-9]\w+)/(?P<webhook_token>[A-z0-9-]{1,100})(\?(?P<params>[A-z0-9-\.=&]{1,50}))?";
 
 lazy_static! {
 	static ref PATH_REGEX: Regex = Regex::new(PATH_RE).unwrap();
 }
 
+pub fn form_response(code: u8, message: &str) -> Body {
+	return format!("{{ code: {}, message: {} }}", code, message).into();
+}
+
 pub async fn read_body<'a>(body: Body) -> Result<String, &'a str> {
-	let mut seen: usize = 0;
 	let full_body = body
 		.try_fold(Vec::new(), |mut data, chunk| async move {
-			seen += chunk.len();
-			if seen > BODY_LIMIT as usize {
-				// not great, but i couldn't find a way to initialise
-				// a hyper error without redoing it entirely
-				return Ok(Vec::new());
-				// return Err("Body too large".into());
-			}
-
 			data.extend_from_slice(&chunk);
 			return Ok(data);
 		})
@@ -59,7 +56,7 @@ pub async fn read_body<'a>(body: Body) -> Result<String, &'a str> {
 		return Err("Invalid body size.");
 	}
 
-	let string = String::from_utf8(body).unwrap();
+	let string = String::from_utf8(body).expect("Invalid UTF-8");
 	return Ok(string);
 }
 
@@ -75,7 +72,11 @@ pub fn validate_request(parts: &Parts) -> Result<WebhookParts, &str> {
 	}
 
 	let path = parts.uri.path();
-	let caps = PATH_REGEX.captures(path).unwrap();
+	let caps = match PATH_REGEX.captures(path) {
+		Some(caps) => caps,
+		None => return Err("Invalid path."),
+	};
+
 	let webhook_id = caps.name("webhook_id");
 	if webhook_id.is_none() {
 		return Err("Webhook ID could not be indentified.");
@@ -91,6 +92,26 @@ pub fn validate_request(parts: &Parts) -> Result<WebhookParts, &str> {
 		webhook_id: webhook_id.unwrap().as_str().to_string(),
 		webhook_token: webhook_token.unwrap().as_str().to_string(),
 	});
+}
+
+pub async fn deliver(batch: WebhookBatch) -> () {
+	let client = Client::new();
+	let uri: String = get_env_default(
+		"DISCORD_WEBHOOK_ENDPOINT",
+		DISCORD_WEBHOOK_ENDPOINT.to_string(),
+	);
+	let request = Request::builder()
+		.uri(uri)
+		.method(Method::POST)
+		.header("Content-Type", "application/json")
+		// todo: merge body
+		.body(Body::empty())
+		.unwrap();
+
+	let response = client.request(request).await;
+	if response.is_err() {
+		eprintln!("Failed to deliver batch ");
+	}
 }
 
 pub fn hash_parts(parts: &WebhookParts) -> u64 {

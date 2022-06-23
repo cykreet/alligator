@@ -1,5 +1,4 @@
 mod env;
-mod payload;
 mod webhook;
 
 use hyper::{
@@ -7,45 +6,60 @@ use hyper::{
 	Body, Error, Request, Response, Server, StatusCode,
 };
 use lazy_static::lazy_static;
-use std::{net::SocketAddr, time::Duration};
-use tokio::task;
+use std::{
+	collections::{
+		hash_map::Entry::{Occupied, Vacant},
+		HashMap,
+	},
+	net::SocketAddr,
+	time::{Duration, SystemTime},
+};
+use tokio::{
+	sync::Mutex,
+	task::{self, JoinHandle},
+	time::sleep,
+};
 
 use crate::{
-	env::{get_env, get_env_default, DEFAULT_EXPIRES_DURATION, DEFAULT_PORT},
-	payload::form_response,
-	webhook::{hash_parts, read_body, validate_request, WebhookPayload},
+	env::{get_env, get_env_default, DEFAULT_DELIVER_DURATION, DEFAULT_PORT},
+	webhook::{
+		deliver, form_response, hash_parts, read_body, validate_request, WebhookBatch, WebhookPayload,
+	},
 };
 
 lazy_static! {
-	static ref EXPIRES_DURATION: Duration = {
-		let duration: Option<u64> = get_env("EXPIRES_DURATION", false);
+	static ref TASK_MAP: Mutex<HashMap<u64, JoinHandle<()>>> = Mutex::new(HashMap::new());
+	static ref BATCH_MAP: Mutex<HashMap<u64, WebhookBatch>> = Mutex::new(HashMap::new());
+	static ref DELIVER_DURATION: Duration = {
+		let duration: Option<u64> = get_env("DELIVER_MS", false);
 		if duration.is_some() {
 			return Duration::from_millis(duration.unwrap());
 		}
 
-		return DEFAULT_EXPIRES_DURATION;
+		return DEFAULT_DELIVER_DURATION;
 	};
 }
 
 async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error> {
 	let (parts, body) = request.into_parts();
-	let full_body = match read_body(body).await {
-		Ok(body) => body,
+	let webhook_parts = match validate_request(&parts) {
+		Ok(parts) => parts,
 		Err(err) => {
 			// completely arbitrary error codes, but should stick
 			let body = form_response(100, err);
 			let response = Response::builder()
 				.status(StatusCode::BAD_REQUEST)
+				.header("Content-Type", "application/json")
 				.body(body)
 				.unwrap();
 			return Ok(response);
 		}
 	};
 
-	let webhook_parts = match validate_request(&parts) {
-		Ok(val) => val,
+	let full_body = match read_body(body).await {
+		Ok(body) => body,
 		Err(err) => {
-			let body = form_response(102, err);
+			let body = form_response(101, err);
 			let response = Response::builder()
 				.status(StatusCode::BAD_REQUEST)
 				.body(body)
@@ -56,11 +70,44 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 
 	let hash = hash_parts(&webhook_parts);
 	let payload: WebhookPayload = serde_json::from_str(&full_body).unwrap();
-	let batch = payload::get_insert(hash, webhook_parts, payload).await;
+	let mut batch_map = BATCH_MAP.lock().await;
+	let batch = match batch_map.entry(hash) {
+		Occupied(entry) => {
+			let batch = entry.into_mut();
+			batch.payloads.push(payload);
+			batch.clone()
+		}
+		Vacant(entry) => {
+			let batch = entry.insert(WebhookBatch {
+				created: SystemTime::now(),
+				payloads: vec![payload],
+				parts: webhook_parts,
+			});
+
+			batch.clone()
+		}
+	};
+
+	let mut task_map = TASK_MAP.lock().await;
+	let task = task_map.entry(hash);
+	if let Occupied(mut entry) = task {
+		let task = entry.get_mut();
+		task.abort();
+		entry.remove();
+	}
+
+	let task_batch = batch.clone();
 	let task = task::spawn(async move {
-		payload::deliver(hash).await;
+		sleep(*DELIVER_DURATION).await;
+		let mut task_map = TASK_MAP.lock().await;
+		let mut batch_map = BATCH_MAP.lock().await;
+
+		deliver(task_batch).await;
+		batch_map.remove(&hash);
+		task_map.remove(&hash);
 	});
 
+	task_map.insert(hash, task);
 	let response = Response::builder()
 		.status(StatusCode::OK)
 		.header("X-Batch-Id", hash)
