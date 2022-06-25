@@ -22,14 +22,12 @@ use tokio::{
 
 use crate::{
 	env::{get_env, get_env_default, DEFAULT_DELIVER_DURATION, DEFAULT_PORT},
-	webhook::{
-		deliver, form_response, hash_parts, read_body, validate_request, WebhookBatch, WebhookPayload,
-	},
+	webhook::{form_response, validate_request, WebhookBatch, WebhookParts, WebhookPayload},
 };
 
 lazy_static! {
-	static ref TASK_MAP: Mutex<HashMap<u64, JoinHandle<()>>> = Mutex::new(HashMap::new());
-	static ref BATCH_MAP: Mutex<HashMap<u64, WebhookBatch>> = Mutex::new(HashMap::new());
+	static ref TASK_MAP: Mutex<HashMap<WebhookParts, JoinHandle<()>>> = Mutex::new(HashMap::new());
+	static ref BATCH_MAP: Mutex<HashMap<WebhookParts, WebhookBatch>> = Mutex::new(HashMap::new());
 	static ref DELIVER_DURATION: Duration = {
 		let duration: Option<u64> = get_env("DELIVER_MS", false);
 		if duration.is_some() {
@@ -56,32 +54,33 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 		}
 	};
 
-	let full_body = match read_body(body).await {
-		Ok(body) => body,
+	let full_body = hyper::body::to_bytes(body).await?;
+	let payload: WebhookPayload = match std::str::from_utf8(&full_body) {
+		Ok(str) => serde_json::from_str(str).expect("Failed to parse JSON"),
 		Err(err) => {
-			let body = form_response(101, err);
+			let body = form_response(101, err.to_string().as_str());
 			let response = Response::builder()
 				.status(StatusCode::BAD_REQUEST)
+				.header("Content-Type", "application/json")
 				.body(body)
 				.unwrap();
 			return Ok(response);
 		}
 	};
 
-	let hash = hash_parts(&webhook_parts);
-	let payload: WebhookPayload = serde_json::from_str(&full_body).unwrap();
 	let mut batch_map = BATCH_MAP.lock().await;
-	let batch = match batch_map.entry(hash) {
+	let batch = match batch_map.entry(webhook_parts.clone()) {
 		Occupied(entry) => {
 			let batch = entry.into_mut();
 			batch.payloads.push(payload);
 			batch.clone()
 		}
 		Vacant(entry) => {
+			let key = entry.key().clone();
 			let batch = entry.insert(WebhookBatch {
 				created: SystemTime::now(),
 				payloads: vec![payload],
-				parts: webhook_parts,
+				parts: key,
 			});
 
 			batch.clone()
@@ -89,28 +88,29 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 	};
 
 	let mut task_map = TASK_MAP.lock().await;
-	let task = task_map.entry(hash);
+	let task = task_map.entry(webhook_parts.clone());
 	if let Occupied(mut entry) = task {
 		let task = entry.get_mut();
 		task.abort();
 		entry.remove();
-	}
+		task_map.remove(&webhook_parts);
+	};
 
 	let task_batch = batch.clone();
+	let task_key = webhook_parts.clone();
 	let task = task::spawn(async move {
 		sleep(*DELIVER_DURATION).await;
 		let mut task_map = TASK_MAP.lock().await;
 		let mut batch_map = BATCH_MAP.lock().await;
 
-		deliver(task_batch).await;
-		batch_map.remove(&hash);
-		task_map.remove(&hash);
+		webhook::deliver(task_batch).await;
+		batch_map.remove(&task_key);
+		task_map.remove(&task_key);
 	});
 
-	task_map.insert(hash, task);
+	task_map.insert(webhook_parts, task);
 	let response = Response::builder()
-		.status(StatusCode::OK)
-		.header("X-Batch-Id", hash)
+		.status(StatusCode::NO_CONTENT)
 		.header("X-Batch-Size", batch.payloads.len())
 		.body(Body::empty())
 		.unwrap();
@@ -118,13 +118,13 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let port: u16 = get_env_default("PORT", DEFAULT_PORT);
 	let addr = SocketAddr::from(([127, 0, 0, 1], port));
 	let make_svc = make_service_fn(|_conn| async { Ok::<_, Error>(service_fn(handle_request)) });
 	let server = Server::bind(&addr).serve(make_svc);
+
 	println!("Server listening at {}", server.local_addr());
-	if let Err(err) = server.await {
-		eprintln!("Something went wrong: {}", err);
-	}
+	server.await?;
+	Ok(())
 }
