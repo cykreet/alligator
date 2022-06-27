@@ -22,7 +22,7 @@ use tokio::{
 
 use crate::{
 	env::{get_env, get_env_default, DEFAULT_DELIVER_DURATION, DEFAULT_PORT},
-	webhook::{form_response, validate_request, WebhookBatch, WebhookParts, WebhookPayload},
+	webhook::{form_error_body, parse_body, validate_request, WebhookBatch, WebhookParts},
 };
 
 lazy_static! {
@@ -44,7 +44,7 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 		Ok(parts) => parts,
 		Err(err) => {
 			// completely arbitrary error codes, but should stick
-			let body = form_response(100, err);
+			let body = form_error_body(100, err);
 			let response = Response::builder()
 				.status(StatusCode::BAD_REQUEST)
 				.header("Content-Type", "application/json")
@@ -54,11 +54,10 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 		}
 	};
 
-	let full_body = hyper::body::to_bytes(body).await?;
-	let payload: WebhookPayload = match std::str::from_utf8(&full_body) {
-		Ok(str) => serde_json::from_str(str).expect("Failed to parse JSON"),
+	let payload = match parse_body(body).await {
+		Ok(payload) => payload,
 		Err(err) => {
-			let body = form_response(101, err.to_string().as_str());
+			let body = form_error_body(101, err);
 			let response = Response::builder()
 				.status(StatusCode::BAD_REQUEST)
 				.header("Content-Type", "application/json")

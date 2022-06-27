@@ -27,6 +27,7 @@ pub struct WebhookPayload {
 	pub avatar_url: Option<String>,
 	pub embeds: Option<Vec<String>>,
 	pub tts: Option<bool>,
+	pub thread_name: Option<String>,
 }
 
 const PATH_RE: &str = r"/api/(v[0-9]{1,3}/)?webhooks/(?P<webhook_id>[0-9]\w+)/(?P<webhook_token>[A-z0-9-]{1,100})(\?(?P<params>[A-z0-9-\.=&]{1,50}))?";
@@ -35,10 +36,12 @@ lazy_static! {
 	static ref PATH_REGEX: Regex = Regex::new(PATH_RE).unwrap();
 }
 
-pub fn form_response(code: u8, message: &str) -> Body {
+/// Formats an error code and message into a JSON object.
+pub fn form_error_body(code: u8, message: &str) -> Body {
 	return format!("{{ code: {}, message: \"{}\" }}", code, message).into();
 }
 
+/// Validates a request and returns the WebhookParts if valid.
 pub fn validate_request(parts: &Parts) -> Result<WebhookParts, &str> {
 	if parts.method != Method::POST {
 		return Err("Method not supported.");
@@ -73,6 +76,27 @@ pub fn validate_request(parts: &Parts) -> Result<WebhookParts, &str> {
 	});
 }
 
+/// Parses a request body and returns the WebhookPayload if valid.
+pub async fn parse_body<'a>(body: Body) -> Result<WebhookPayload, &'a str> {
+	let bytes = match hyper::body::to_bytes(body).await {
+		Ok(bytes) => bytes,
+		Err(_) => return Err("Failed to parse body."),
+	};
+
+	let string = match std::str::from_utf8(&bytes) {
+		Ok(string) => string,
+		Err(_) => return Err("Invalid UTF-8."),
+	};
+
+	let payload: WebhookPayload = match serde_json::from_str(string).ok() {
+		Some(payload) => payload,
+		None => return Err("Invalid JSON."),
+	};
+
+	return Ok(payload);
+}
+
+/// Delivers a batch of payloads to a webhook.
 pub async fn deliver(batch: WebhookBatch) -> () {
 	let host: String = get_env_default(
 		"DISCORD_WEBHOOK_ENDPOINT",
@@ -105,6 +129,7 @@ pub async fn deliver(batch: WebhookBatch) -> () {
 	}
 }
 
+/// Merges a vector of WebhookPayloads into a single body.
 pub fn merge_body(payloads: &Vec<WebhookPayload>) -> Result<Body, String> {
 	let mut aggr = WebhookPayload {
 		content: None,
@@ -112,6 +137,7 @@ pub fn merge_body(payloads: &Vec<WebhookPayload>) -> Result<Body, String> {
 		avatar_url: None,
 		embeds: None,
 		tts: None,
+		thread_name: None,
 	};
 
 	for payload in payloads {
@@ -126,6 +152,10 @@ pub fn merge_body(payloads: &Vec<WebhookPayload>) -> Result<Body, String> {
 
 		if aggr.tts.is_none() && payload.tts.is_some() {
 			aggr.tts = Some(payload.tts.unwrap());
+		}
+
+		if aggr.thread_name.is_none() && payload.thread_name.is_some() {
+			aggr.thread_name = Some(payload.thread_name.unwrap());
 		}
 
 		if payload.content.is_some() {
@@ -145,8 +175,7 @@ pub fn merge_body(payloads: &Vec<WebhookPayload>) -> Result<Body, String> {
 	let body = match serde_json::to_string(&aggr) {
 		Ok(body) => body,
 		Err(err) => {
-			let error = format!("Failed to serialise payload:\n{}", err);
-			return Err(error);
+			return Err(err.to_string());
 		}
 	};
 
