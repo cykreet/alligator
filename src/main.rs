@@ -12,7 +12,7 @@ use std::{
 		HashMap,
 	},
 	net::SocketAddr,
-	time::{Duration, SystemTime},
+	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
 	sync::Mutex,
@@ -22,7 +22,7 @@ use tokio::{
 
 use crate::{
 	env::{get_env, get_env_default, DEFAULT_DELIVER_DURATION, DEFAULT_PORT},
-	webhook::{form_error_body, parse_body, validate_request, WebhookBatch, WebhookParts},
+	webhook::{form_error_res, parse_body, validate_request, WebhookBatch, WebhookParts},
 };
 
 lazy_static! {
@@ -44,12 +44,7 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 		Ok(parts) => parts,
 		Err(err) => {
 			// completely arbitrary error codes, but should stick
-			let body = form_error_body(100, err);
-			let response = Response::builder()
-				.status(StatusCode::BAD_REQUEST)
-				.header("Content-Type", "application/json")
-				.body(body)
-				.unwrap();
+			let response = form_error_res(100, err);
 			return Ok(response);
 		}
 	};
@@ -57,12 +52,7 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 	let payload = match parse_body(body).await {
 		Ok(payload) => payload,
 		Err(err) => {
-			let body = form_error_body(101, err);
-			let response = Response::builder()
-				.status(StatusCode::BAD_REQUEST)
-				.header("Content-Type", "application/json")
-				.body(body)
-				.unwrap();
+			let response = form_error_res(101, err);
 			return Ok(response);
 		}
 	};
@@ -96,21 +86,23 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 	};
 
 	let task_batch = batch.clone();
-	let task_key = webhook_parts.clone();
+	let task_parts = webhook_parts.clone();
 	let task = task::spawn(async move {
 		sleep(*DELIVER_DURATION).await;
 		let mut task_map = TASK_MAP.lock().await;
 		let mut batch_map = BATCH_MAP.lock().await;
 
 		webhook::deliver(task_batch).await;
-		batch_map.remove(&task_key);
-		task_map.remove(&task_key);
+		batch_map.remove(&task_parts);
+		task_map.remove(&task_parts);
 	});
 
 	task_map.insert(webhook_parts, task);
+	let since_epoch = batch.created.duration_since(UNIX_EPOCH).unwrap();
 	let response = Response::builder()
 		.status(StatusCode::NO_CONTENT)
 		.header("X-Batch-Size", batch.payloads.len())
+		.header("X-Batch-Created", since_epoch.as_millis().to_string())
 		.body(Body::empty())
 		.unwrap();
 	return Ok(response);

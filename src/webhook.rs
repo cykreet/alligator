@@ -1,4 +1,6 @@
-use hyper::{header::HeaderValue, http::request::Parts, Body, Client, Method, Request};
+use hyper::{
+	header::HeaderValue, http::request::Parts, Body, Client, Method, Request, Response, StatusCode,
+};
 use hyper_tls::HttpsConnector;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -36,9 +38,14 @@ lazy_static! {
 	static ref PATH_REGEX: Regex = Regex::new(PATH_RE).unwrap();
 }
 
-/// Formats an error code and message into a JSON object.
-pub fn form_error_body(code: u8, message: &str) -> Body {
-	return format!("{{ code: {}, message: \"{}\" }}", code, message).into();
+/// Forms a JSON error response from a code and message.
+pub fn form_error_res(code: u8, message: &str) -> Response<Body> {
+	let body = format!("{{ code: {}, message: \"{}\" }}", code, message).into();
+	return Response::builder()
+		.status(StatusCode::BAD_REQUEST)
+		.header("Content-Type", "application/json")
+		.body(body)
+		.unwrap();
 }
 
 /// Validates a request and returns the WebhookParts if valid.
