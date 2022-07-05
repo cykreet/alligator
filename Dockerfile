@@ -1,12 +1,12 @@
-FROM rust:alpine3.16 as build
+FROM rust:alpine3.16 as builder
+RUN apk add build-base libressl-dev
 
 WORKDIR /usr/src/alligator
-COPY Cargo.toml Cargo.lock ./
-COPY ./src ./src
-RUN cargo build --release
-RUN rm src/*.rs
+COPY . .
+RUN cargo build --release && strip target/release/alligator
 
-FROM rust:alpine3.16
+FROM alpine:3.16
+RUN apk add libressl
 
-COPY --from=build /usr/local/cargo/bin/alligator /usr/local/bin/alligator
-ENTRYPOINT [ "/usr/local/bin/alligator" ]
+COPY --from=builder /usr/src/alligator/target/release/alligator /usr/local/bin/alligator
+CMD ["/usr/local/bin/alligator"]
