@@ -14,7 +14,7 @@ http://127.0.0.1:8080/api/webhooks/985948921572499487/KD9kzKaXuLvcc6lfDMQsUd4h8D
 
 ## deploy
 
-this repository is set up to automatically push to the docker registry with each new version, so that would be the easiest way to get started.
+this repository is set up to automatically push to the [docker registry](https://hub.docker.com/r/cykreet/alligator) with each new version, so that would be the easiest way to get started.
 
 ```bash
 docker run -d -p 8080:8080 --name alligator cykreet/alligator:latest
@@ -28,11 +28,11 @@ responses are returned as soon as possible, i.e once the request has been parsed
 
 alligator also returns a few potentially useful response headers:
 
-| header            | description                                           |
-| ----------------- | ----------------------------------------------------- |
-| `x-batch-id`      | the batch id, formatted as `webhook_id-webhook_token` |
-| `x-batch-size`    | the number of requests contained in the request batch |
-| `x-batch-created` | milliseconds since unix epoch                         |
+| header            | description                                                                 |
+| ----------------- | --------------------------------------------------------------------------- |
+| `x-batch-id`      | the batch id, formatted as `webhook_id-webhook_token`                       |
+| `x-batch-size`    | the number of requests contained in the request batch                       |
+| `x-batch-created` | milliseconds since unix epoch when the first request was added to the batch |
 
 ## environment variables
 
