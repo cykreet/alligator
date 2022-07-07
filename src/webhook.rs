@@ -1,13 +1,15 @@
-use hyper::{
-	header::HeaderValue, http::request::Parts, Body, Client, Method, Request, Response, StatusCode,
-};
+use hyper::{header::HeaderValue, http::request::Parts, Body, Client, Method, Request, StatusCode};
 use hyper_tls::HttpsConnector;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{hash::Hash, time::SystemTime};
 
-use crate::env::{get_env_default, DISCORD_WEBHOOK_ENDPOINT};
+use crate::{
+	env::{get_env_default, DISCORD_WEBHOOK_ENDPOINT},
+	err::ValidateError,
+};
 
 #[derive(Clone)]
 pub struct WebhookBatch {
@@ -19,6 +21,7 @@ pub struct WebhookBatch {
 #[derive(Hash, Clone, Eq, PartialEq)]
 pub struct WebhookParts {
 	pub webhook_id: String,
+	pub params: Option<String>,
 	pub webhook_token: String,
 }
 
@@ -27,7 +30,9 @@ pub struct WebhookPayload {
 	pub content: Option<String>,
 	pub username: Option<String>,
 	pub avatar_url: Option<String>,
-	pub embeds: Option<Vec<String>>,
+	pub embeds: Option<Vec<Value>>,
+	pub allowed_mentions: Option<Value>,
+	pub components: Option<Vec<Value>>,
 	pub tts: Option<bool>,
 	pub thread_name: Option<String>,
 }
@@ -38,46 +43,56 @@ lazy_static! {
 	static ref PATH_REGEX: Regex = Regex::new(PATH_RE).unwrap();
 }
 
-/// Forms a JSON error response from a code and message.
-pub fn form_error_res(code: u8, message: &str) -> Response<Body> {
-	let body = format!("{{ code: {}, message: \"{}\" }}", code, message).into();
-	return Response::builder()
-		.status(StatusCode::BAD_REQUEST)
-		.header("Content-Type", "application/json")
-		.body(body)
-		.unwrap();
-}
-
 /// Validates a request and returns the WebhookParts if valid.
-pub fn validate_request(parts: &Parts) -> Result<WebhookParts, &str> {
+pub fn validate_request(parts: &Parts) -> Result<WebhookParts, ValidateError> {
 	if parts.method != Method::POST {
-		return Err("Method not supported.");
+		return Err(ValidateError::new(
+			StatusCode::METHOD_NOT_ALLOWED,
+			String::from("Method not supported."),
+		));
 	}
 
 	let content_type = parts.headers.get("content-type");
 	let header_value = HeaderValue::from_static("application/json");
 	if content_type != Some(&header_value) {
-		return Err("Expected \"Content-Type\" header to be one of {'application/json', 'application/x-www-form-urlencoded', 'multipart/form-data'}.");
+		return Err(ValidateError::new(
+			StatusCode::BAD_REQUEST,
+			String::from("Expected \"Content-Type\" header to be one of {'application/json', 'application/x-www-form-urlencoded', 'multipart/form-data'}.")
+		));
 	}
 
 	let path = parts.uri.path();
 	let caps = match PATH_REGEX.captures(path) {
 		Some(caps) => caps,
-		None => return Err("Invalid path."),
+		None => {
+			return Err(ValidateError::new(
+				StatusCode::NOT_FOUND,
+				String::from("Invalid path."),
+			))
+		}
 	};
 
 	let webhook_id = caps.name("webhook_id");
 	if webhook_id.is_none() {
-		return Err("Webhook ID could not be indentified.");
+		return Err(ValidateError::new(
+			StatusCode::BAD_REQUEST,
+			String::from("Webhook ID could not be identified."),
+		));
 	}
 
 	let webhook_token = caps.name("webhook_token");
 	if webhook_token.is_none() {
-		return Err("Webhook token could not be indentified.");
+		return Err(ValidateError::new(
+			StatusCode::BAD_REQUEST,
+			String::from("Webhook token could not be identified."),
+		));
 	}
 
-	// todo: params
 	return Ok(WebhookParts {
+		params: match parts.uri.query() {
+			Some(params) => Some(params.to_string()),
+			_ => None,
+		},
 		webhook_id: webhook_id.unwrap().as_str().to_string(),
 		webhook_token: webhook_token.unwrap().as_str().to_string(),
 	});
@@ -95,9 +110,12 @@ pub async fn parse_body<'a>(body: Body) -> Result<WebhookPayload, &'a str> {
 		Err(_) => return Err("Invalid UTF-8."),
 	};
 
-	let payload: WebhookPayload = match serde_json::from_str(string).ok() {
-		Some(payload) => payload,
-		None => return Err("Invalid JSON."),
+	let payload: WebhookPayload = match serde_json::from_str(string) {
+		Ok(payload) => payload,
+		Err(err) => {
+			println!("{}", err.to_string());
+			return Err("Invalid JSON.");
+		}
 	};
 
 	return Ok(payload);
@@ -111,8 +129,11 @@ pub async fn deliver(batch: WebhookBatch) -> () {
 	);
 
 	let uri = format!(
-		"{}{}/{}",
-		host, batch.parts.webhook_id, batch.parts.webhook_token
+		"{}{}/{}?{}",
+		host,
+		batch.parts.webhook_id,
+		batch.parts.webhook_token,
+		batch.parts.params.unwrap_or_else(|| String::from("")),
 	);
 
 	let body = match merge_body(&batch.payloads) {
@@ -123,9 +144,9 @@ pub async fn deliver(batch: WebhookBatch) -> () {
 	};
 
 	let request = Request::builder()
-		.uri(uri)
-		.method(Method::POST)
 		.header("Content-Type", "application/json")
+		.method(Method::POST)
+		.uri(uri)
 		.body(body)
 		.unwrap();
 	let https = HttpsConnector::new();
@@ -144,6 +165,8 @@ pub fn merge_body(payloads: &Vec<WebhookPayload>) -> Result<Body, String> {
 		avatar_url: None,
 		embeds: None,
 		tts: None,
+		allowed_mentions: None,
+		components: None,
 		thread_name: None,
 	};
 
@@ -165,6 +188,10 @@ pub fn merge_body(payloads: &Vec<WebhookPayload>) -> Result<Body, String> {
 			aggr.thread_name = Some(payload.thread_name.unwrap());
 		}
 
+		if aggr.allowed_mentions.is_none() && payload.allowed_mentions.is_some() {
+			aggr.allowed_mentions = Some(payload.allowed_mentions.unwrap());
+		}
+
 		if payload.content.is_some() {
 			if aggr.content.is_none() {
 				aggr.content = Some(payload.content.unwrap());
@@ -175,6 +202,26 @@ pub fn merge_body(payloads: &Vec<WebhookPayload>) -> Result<Body, String> {
 					payload.content.as_ref().unwrap()
 				);
 				aggr.content = Some(content);
+			}
+		}
+
+		if payload.embeds.is_some() {
+			if aggr.embeds.is_none() {
+				aggr.embeds = Some(payload.embeds.unwrap());
+			} else {
+				let mut embeds = aggr.embeds.unwrap();
+				embeds.extend(payload.embeds.unwrap());
+				aggr.embeds = Some(embeds);
+			}
+		}
+
+		if payload.components.is_some() {
+			if aggr.components.is_none() {
+				aggr.components = Some(payload.components.unwrap());
+			} else {
+				let mut components = aggr.components.unwrap();
+				components.extend(payload.components.unwrap());
+				aggr.components = Some(components);
 			}
 		}
 	}

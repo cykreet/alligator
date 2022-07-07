@@ -1,4 +1,5 @@
 mod env;
+mod err;
 mod webhook;
 
 use hyper::{
@@ -22,7 +23,8 @@ use tokio::{
 
 use crate::{
 	env::{get_env, get_env_default, DEFAULT_DELIVER_DURATION, DEFAULT_PORT},
-	webhook::{form_error_res, parse_body, validate_request, WebhookBatch, WebhookParts},
+	err::form_error_res,
+	webhook::{parse_body, validate_request, WebhookBatch, WebhookParts},
 };
 
 lazy_static! {
@@ -44,7 +46,7 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 		Ok(parts) => parts,
 		Err(err) => {
 			// completely arbitrary error codes, but should stick
-			let response = form_error_res(100, err);
+			let response = form_error_res(err.code, 100, &err.message);
 			return Ok(response);
 		}
 	};
@@ -52,7 +54,7 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 	let payload = match parse_body(body).await {
 		Ok(payload) => payload,
 		Err(err) => {
-			let response = form_error_res(101, err);
+			let response = form_error_res(StatusCode::BAD_REQUEST, 101, err);
 			return Ok(response);
 		}
 	};
@@ -101,6 +103,10 @@ async fn handle_request(request: Request<Body>) -> Result<Response<Body>, Error>
 	let since_epoch = batch.created.duration_since(UNIX_EPOCH).unwrap();
 	let response = Response::builder()
 		.status(StatusCode::NO_CONTENT)
+		.header(
+			"X-Batch-Id",
+			format!("{}-{}", batch.parts.webhook_id, batch.parts.webhook_token),
+		)
 		.header("X-Batch-Size", batch.payloads.len())
 		.header("X-Batch-Created", since_epoch.as_millis().to_string())
 		.body(Body::empty())
@@ -114,7 +120,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let addr = SocketAddr::from(([127, 0, 0, 1], port));
 	let make_svc = make_service_fn(|_conn| async { Ok::<_, Error>(service_fn(handle_request)) });
 	let server = Server::bind(&addr).serve(make_svc);
-
 	println!("Server listening at {}", server.local_addr());
 	server.await?;
 	Ok(())
