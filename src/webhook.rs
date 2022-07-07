@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::{hash::Hash, time::SystemTime};
 
 use crate::{
-	env::{get_env_default, DISCORD_WEBHOOK_ENDPOINT},
+	env::{get_env_default, DEFAULT_WEBHOOK_ENDPOINT},
 	err::ValidateError,
 };
 
@@ -125,7 +125,7 @@ pub async fn parse_body<'a>(body: Body) -> Result<WebhookPayload, &'a str> {
 pub async fn deliver(batch: WebhookBatch) -> () {
 	let host: String = get_env_default(
 		"DISCORD_WEBHOOK_ENDPOINT",
-		DISCORD_WEBHOOK_ENDPOINT.to_string(),
+		DEFAULT_WEBHOOK_ENDPOINT.to_string(),
 	);
 
 	let uri = format!(
