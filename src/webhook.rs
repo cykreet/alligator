@@ -152,8 +152,10 @@ pub async fn deliver(batch: WebhookBatch) -> () {
 	let https = HttpsConnector::new();
 	let client = Client::builder().build(https);
 	let response = client.request(request).await;
-	if let Err(err) = response {
-		eprintln!("Failed to deliver batch:\n{}", err);
+	if let Ok(res) = response {
+		if res.status() >= StatusCode::BAD_REQUEST {
+			eprintln!("Failed to deliver batch:\n{:?}", res.body());
+		}
 	}
 }
 
