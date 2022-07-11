@@ -8,7 +8,7 @@ name = "alligator"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1.19.2", default-features = false, features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { version = "1.19.2", default-features = false, features = ["macros", "rt", "rt-multi-thread", "signal"] }
 futures = { version = "0.3.21", default-features = false, features = ["async-await"] }
 serde = { version = "1.0.137", default-features = false, features = ["derive"] }
 hyper = { version = "0.14.19", features = ["full"] }

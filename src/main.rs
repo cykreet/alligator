@@ -1,6 +1,14 @@
 mod env;
 mod err;
+mod shutdown;
 mod webhook;
+
+use crate::{
+	env::{get_env, get_env_default, DEFAULT_DELIVER_DURATION, DEFAULT_EMBED_LIMIT, DEFAULT_PORT},
+	err::form_error_res,
+	shutdown::Shutdown,
+	webhook::{parse_body, validate_request, WebhookBatch, WebhookParts, WebhookPayload},
+};
 
 use async_recursion::async_recursion;
 use hyper::{
@@ -17,15 +25,13 @@ use std::{
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-	sync::{Mutex, MutexGuard},
+	sync::{
+		broadcast,
+		mpsc::{self, Sender},
+		Mutex, MutexGuard,
+	},
 	task::{self, JoinHandle},
 	time::sleep,
-};
-
-use crate::{
-	env::{get_env, get_env_default, DEFAULT_DELIVER_DURATION, DEFAULT_EMBED_LIMIT, DEFAULT_PORT},
-	err::form_error_res,
-	webhook::{parse_body, validate_request, WebhookBatch, WebhookParts, WebhookPayload},
 };
 
 lazy_static! {
@@ -55,6 +61,8 @@ async fn handle_request(
 	webhook_parts: WebhookParts,
 	batch_map: &mut MutexGuard<HashMap<WebhookParts, WebhookBatch>>,
 	task_map: &mut MutexGuard<HashMap<WebhookParts, JoinHandle<()>>>,
+	mut shutdown: Shutdown,
+	_shutdown_complete: Sender<()>,
 ) -> Result<Response<Body>, Error> {
 	let task = task_map.entry(webhook_parts.clone());
 	if let Occupied(mut entry) = task {
@@ -75,10 +83,19 @@ async fn handle_request(
 				.flat_map(|payload| payload.embeds.as_ref().unwrap())
 				.collect::<Vec<_>>();
 			if embeds.len() >= *EMBED_LIMIT as usize {
-				webhook::deliver(batch.clone()).await;
+				let shutdown_complete = _shutdown_complete.clone();
+				webhook::deliver(batch.clone(), shutdown_complete).await;
 				batch_map.remove(&webhook_parts);
 				task_map.remove(&webhook_parts);
-				return handle_request(payload, webhook_parts, batch_map, task_map).await;
+				return handle_request(
+					payload,
+					webhook_parts,
+					batch_map,
+					task_map,
+					shutdown,
+					_shutdown_complete,
+				)
+				.await;
 			}
 
 			batch.payloads.push(batch_payload);
@@ -110,20 +127,38 @@ async fn handle_request(
 
 	let task_parts = webhook_parts.clone();
 	let task = task::spawn(async move {
-		sleep(*DELIVER_DURATION).await;
-		let mut task_map = TASK_MAP.lock().await;
-		let mut batch_map = BATCH_MAP.lock().await;
+		if shutdown.is_shutdown() {
+			return;
+		}
 
-		webhook::deliver(batch).await;
-		batch_map.remove(&task_parts);
-		task_map.remove(&task_parts);
+		tokio::select! {
+			_ = sleep(*DELIVER_DURATION) => {
+				let mut task_map = TASK_MAP.lock().await;
+				let mut batch_map = BATCH_MAP.lock().await;
+				webhook::deliver(batch, _shutdown_complete).await;
+				batch_map.remove(&task_parts);
+				task_map.remove(&task_parts);
+
+			},
+			_ = shutdown.recv() => {
+				let mut task_map = TASK_MAP.lock().await;
+				let mut batch_map = BATCH_MAP.lock().await;
+				webhook::deliver(batch, _shutdown_complete).await;
+				batch_map.remove(&task_parts);
+				task_map.remove(&task_parts);
+			}
+		};
 	});
 
 	task_map.insert(webhook_parts, task);
 	return Ok(response);
 }
 
-async fn forward_request(request: Request<Body>) -> Result<Response<Body>, Error> {
+async fn forward_request(
+	request: Request<Body>,
+	shutdown: Shutdown,
+	_shutdown_complete: Sender<()>,
+) -> Result<Response<Body>, Error> {
 	let (parts, body) = request.into_parts();
 	let webhook_parts = match validate_request(&parts) {
 		Ok(parts) => parts,
@@ -151,16 +186,54 @@ async fn forward_request(request: Request<Body>) -> Result<Response<Body>, Error
 
 	let mut task_map = TASK_MAP.lock().await;
 	let mut batch_map = BATCH_MAP.lock().await;
-	return handle_request(payload, webhook_parts, &mut batch_map, &mut task_map).await;
+	return handle_request(
+		payload,
+		webhook_parts,
+		&mut batch_map,
+		&mut task_map,
+		shutdown,
+		_shutdown_complete,
+	)
+	.await;
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+	let (notify_shutdown, _) = broadcast::channel(1);
+	let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
 	let port: u16 = get_env_default("LISTEN_PORT", DEFAULT_PORT);
 	let addr = SocketAddr::from(([0, 0, 0, 0], port));
-	let make_svc = make_service_fn(|_conn| async { Ok::<_, Error>(service_fn(forward_request)) });
-	let server = Server::bind(&addr).serve(make_svc);
-	println!("Server listening at {}", server.local_addr());
-	server.await?;
-	Ok(())
+	let make_service = make_service_fn(|_conn| {
+		let shutdown_compelete_tx = shutdown_complete_tx.clone();
+		let notify_shutdown = notify_shutdown.clone();
+		let service = service_fn(move |request| {
+			forward_request(
+				request,
+				Shutdown::new(notify_shutdown.subscribe()),
+				shutdown_compelete_tx.clone(),
+			)
+		});
+		async move { Ok::<_, Error>(service) }
+	});
+
+	let server = Server::bind(&addr).serve(make_service);
+	println!("Server listening at http://{}", server.local_addr());
+	let graceful = server.with_graceful_shutdown(async {
+		tokio::signal::ctrl_c()
+			.await
+			.expect("Failed to install SIGINT handler.");
+	});
+
+	tokio::select! {
+		_ = graceful => {
+			println!("Received SIGINT, exiting.");
+		},
+	}
+
+	drop(notify_shutdown);
+	drop(shutdown_complete_tx);
+	// instead of sending messages to all tasks that need finishing, we wait
+	// for the channel to be closed, which happens when every sender has been dropped
+	// https://tokio.rs/tokio/topics/shutdown
+	let _ = shutdown_complete_rx.recv().await;
 }

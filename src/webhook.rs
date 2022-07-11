@@ -5,6 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{hash::Hash, time::SystemTime};
+use tokio::sync::{mpsc::Sender, oneshot};
 
 use crate::{
 	env::{get_env_default, DEFAULT_WEBHOOK_ENDPOINT},
@@ -122,7 +123,7 @@ pub async fn parse_body<'a>(body: Body) -> Result<WebhookPayload, &'a str> {
 }
 
 /// Delivers a batch of payloads to a webhook.
-pub async fn deliver(batch: WebhookBatch) -> () {
+pub async fn deliver(batch: WebhookBatch, _shutdown_complete: Sender<()>) {
 	let host: String = get_env_default(
 		"DISCORD_WEBHOOK_ENDPOINT",
 		DEFAULT_WEBHOOK_ENDPOINT.to_string(),
