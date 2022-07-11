@@ -157,7 +157,7 @@ async fn forward_request(request: Request<Body>) -> Result<Response<Body>, Error
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let port: u16 = get_env_default("LISTEN_PORT", DEFAULT_PORT);
-	let addr = SocketAddr::from(([127, 0, 0, 1], port));
+	let addr = SocketAddr::from(([0, 0, 0, 0], port));
 	let make_svc = make_service_fn(|_conn| async { Ok::<_, Error>(service_fn(forward_request)) });
 	let server = Server::bind(&addr).serve(make_svc);
 	println!("Server listening at {}", server.local_addr());
