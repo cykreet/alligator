@@ -1,16 +1,16 @@
+use crate::{
+	env::{get_env_default, DEFAULT_WEBHOOK_ENDPOINT},
+	err::ValidateError,
+};
+
 use hyper::{header::HeaderValue, http::request::Parts, Body, Client, Method, Request, StatusCode};
-use hyper_tls::HttpsConnector;
+use hyper_rustls::HttpsConnectorBuilder;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{hash::Hash, time::SystemTime};
-use tokio::sync::{mpsc::Sender, oneshot};
-
-use crate::{
-	env::{get_env_default, DEFAULT_WEBHOOK_ENDPOINT},
-	err::ValidateError,
-};
+use tokio::sync::mpsc::Sender;
 
 #[derive(Clone)]
 pub struct WebhookBatch {
@@ -150,7 +150,11 @@ pub async fn deliver(batch: WebhookBatch, _shutdown_complete: Sender<()>) {
 		.uri(uri)
 		.body(body)
 		.unwrap();
-	let https = HttpsConnector::new();
+	let https = HttpsConnectorBuilder::new()
+		.with_native_roots()
+		.https_only()
+		.enable_http1()
+		.build();
 	let client = Client::builder().build(https);
 	let response = client.request(request).await;
 	if let Ok(res) = response {

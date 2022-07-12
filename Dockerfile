@@ -1,5 +1,5 @@
 FROM rust:alpine3.16 as builder
-RUN apk add --no-cache build-base libressl-dev
+RUN apk add -q --update-cache --no-cache build-base openssl-dev
 
 RUN USER=root cargo new --bin alligator
 WORKDIR /alligator
@@ -16,7 +16,7 @@ RUN rm ./target/release/deps/alligator*
 RUN cargo build --release && strip ./target/release/alligator
 
 FROM alpine:3.16
-RUN apk --no-cache add libressl
+RUN apk update --quiet libgcc
 
-COPY --from=builder /alligator/target/release/alligator /usr/local/bin/alligator
-CMD ["/usr/local/bin/alligator"]
+COPY --from=builder /alligator/target/release/alligator /bin/alligator
+CMD ["/bin/alligator"]
