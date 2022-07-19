@@ -1,13 +1,15 @@
+mod body;
 mod env;
 mod err;
 mod shutdown;
 mod webhook;
 
 use crate::{
+	body::parse_body,
 	env::{get_env, get_env_default, DEFAULT_DELIVER_DURATION, DEFAULT_EMBED_LIMIT, DEFAULT_PORT},
 	err::form_error_res,
 	shutdown::Shutdown,
-	webhook::{parse_body, validate_request, WebhookBatch, WebhookParts, WebhookPayload},
+	webhook::{validate_request, WebhookBatch, WebhookParts, WebhookPayload},
 };
 
 use async_recursion::async_recursion;
@@ -180,7 +182,7 @@ async fn forward_request(
 	if payload.embeds.is_some() && payload.embeds.as_ref().unwrap().len() > *EMBED_LIMIT as usize {
 		// note: could be neat to queue up payloads and send them later - project for another day,
 		// could be relevant: https://doc.rust-lang.org/std/collections/struct.VecDeque.html
-		let response = form_error_res(StatusCode::BAD_REQUEST, 102, "Too many embeds");
+		let response = form_error_res(StatusCode::BAD_REQUEST, 102, "Too many embeds.");
 		return Ok(response);
 	}
 
@@ -225,7 +227,11 @@ async fn main() {
 	});
 
 	tokio::select! {
-		_ = graceful => {
+		server = graceful => {
+			if let Err(err) = server {
+				eprintln!("Something went wrong:\n{}", err);
+			};
+
 			println!("Received SIGINT, exiting.");
 		},
 	}

@@ -16,7 +16,6 @@ RUN rm ./target/release/deps/alligator*
 RUN cargo build --release && strip ./target/release/alligator
 
 FROM alpine:3.16
-RUN apk update --quiet libgcc
 
 COPY --from=builder /alligator/target/release/alligator /bin/alligator
 CMD ["/bin/alligator"]

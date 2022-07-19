@@ -1,9 +1,10 @@
 use crate::{
+	body::{body_to_string, merge_body},
 	env::{get_env_default, DEFAULT_WEBHOOK_ENDPOINT},
 	err::ValidateError,
 };
 
-use hyper::{header::HeaderValue, http::request::Parts, Body, Client, Method, Request, StatusCode};
+use hyper::{header::HeaderValue, http::request::Parts, Client, Method, Request, StatusCode};
 use hyper_rustls::HttpsConnectorBuilder;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -99,29 +100,6 @@ pub fn validate_request(parts: &Parts) -> Result<WebhookParts, ValidateError> {
 	});
 }
 
-/// Parses a request body and returns the WebhookPayload if valid.
-pub async fn parse_body<'a>(body: Body) -> Result<WebhookPayload, &'a str> {
-	let bytes = match hyper::body::to_bytes(body).await {
-		Ok(bytes) => bytes,
-		Err(_) => return Err("Failed to parse body."),
-	};
-
-	let string = match std::str::from_utf8(&bytes) {
-		Ok(string) => string,
-		Err(_) => return Err("Invalid UTF-8."),
-	};
-
-	let payload: WebhookPayload = match serde_json::from_str(string) {
-		Ok(payload) => payload,
-		Err(err) => {
-			println!("{}", err.to_string());
-			return Err("Invalid JSON.");
-		}
-	};
-
-	return Ok(payload);
-}
-
 /// Delivers a batch of payloads to a webhook.
 pub async fn deliver(batch: WebhookBatch, _shutdown_complete: Sender<()>) {
 	let host: String = get_env_default(
@@ -156,89 +134,16 @@ pub async fn deliver(batch: WebhookBatch, _shutdown_complete: Sender<()>) {
 		.enable_http1()
 		.build();
 	let client = Client::builder().build(https);
-	let response = client.request(request).await;
-	if let Ok(res) = response {
-		if res.status() >= StatusCode::BAD_REQUEST {
-			eprintln!("Failed to deliver batch:\n{:?}", res.body());
-		}
-	}
-}
-
-/// Merges a vector of WebhookPayloads into a single body.
-pub fn merge_body(payloads: &Vec<WebhookPayload>) -> Result<Body, String> {
-	let mut aggr = WebhookPayload {
-		content: None,
-		username: None,
-		avatar_url: None,
-		embeds: None,
-		tts: None,
-		allowed_mentions: None,
-		components: None,
-		thread_name: None,
-	};
-
-	for payload in payloads {
-		let payload = payload.clone();
-		if aggr.username.is_none() && payload.username.is_some() {
-			aggr.username = Some(payload.username.unwrap());
-		}
-
-		if aggr.avatar_url.is_none() && payload.avatar_url.is_some() {
-			aggr.avatar_url = Some(payload.avatar_url.unwrap());
-		}
-
-		if aggr.tts.is_none() && payload.tts.is_some() {
-			aggr.tts = Some(payload.tts.unwrap());
-		}
-
-		if aggr.thread_name.is_none() && payload.thread_name.is_some() {
-			aggr.thread_name = Some(payload.thread_name.unwrap());
-		}
-
-		if aggr.allowed_mentions.is_none() && payload.allowed_mentions.is_some() {
-			aggr.allowed_mentions = Some(payload.allowed_mentions.unwrap());
-		}
-
-		if payload.content.is_some() {
-			if aggr.content.is_none() {
-				aggr.content = Some(payload.content.unwrap());
-			} else {
-				let content = format!(
-					"{}\n{}",
-					aggr.content.unwrap(),
-					payload.content.as_ref().unwrap()
-				);
-				aggr.content = Some(content);
+	match client.request(request).await {
+		Ok(res) => {
+			let status = res.status();
+			if status.is_client_error() || status.is_server_error() {
+				let body = body_to_string(res.into_body()).await;
+				eprintln!("Failed to deliver batch:\n{:?}", body);
 			}
 		}
-
-		if payload.embeds.is_some() {
-			if aggr.embeds.is_none() {
-				aggr.embeds = Some(payload.embeds.unwrap());
-			} else {
-				let mut embeds = aggr.embeds.unwrap();
-				embeds.extend(payload.embeds.unwrap());
-				aggr.embeds = Some(embeds);
-			}
-		}
-
-		if payload.components.is_some() {
-			if aggr.components.is_none() {
-				aggr.components = Some(payload.components.unwrap());
-			} else {
-				let mut components = aggr.components.unwrap();
-				components.extend(payload.components.unwrap());
-				aggr.components = Some(components);
-			}
-		}
-	}
-
-	let body = match serde_json::to_string(&aggr) {
-		Ok(body) => body,
 		Err(err) => {
-			return Err(err.to_string());
+			eprintln!("Failed to read delivery response:\n{}", err);
 		}
-	};
-
-	return Ok(body.into());
+	}
 }
